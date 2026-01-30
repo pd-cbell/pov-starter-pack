@@ -143,6 +143,7 @@ locals {
 ############################
 
 data "pagerduty_user" "pov_user" {
+  count = var.pov_user_email != null ? 1 : 0
   email = var.pov_user_email
 }
 
@@ -160,7 +161,7 @@ resource "pagerduty_schedule" "pov_schedule" {
     start                        = "2023-01-01T00:00:00-00:00"
     rotation_virtual_start       = "2023-01-01T00:00:00-00:00"
     rotation_turn_length_seconds = 86400
-    users                        = [data.pagerduty_user.pov_user.id]
+    users                        = var.pov_user_email != null ? [data.pagerduty_user.pov_user[0].id] : []
   }
 }
 

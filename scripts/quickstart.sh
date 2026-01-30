@@ -3,8 +3,6 @@ set -euo pipefail
 
 # OrbitPay POV Provisioner
 # - Interactive wizard to spin up or tear down a POV environment
-# - Handles Workspace creation per customer
-# - Auto-detects configuration or prompts user
 
 MODE="provision"
 if [[ "${1:-}" == "--destroy" || "${1:-}" == "-d" || "${1:-}" == "destroy" ]]; then
@@ -22,8 +20,6 @@ echo "========================================"
 # --- 1. Credentials ---
 if [[ -z "${PAGERDUTY_TOKEN:-}" ]]; then
   echo "Please enter your PagerDuty API Token."
-  echo "  (If using a User Token, you must be an Admin/Owner to provision resources)"
-  echo "  (If using a Domain Token, ensure it has full access)"
   read -rsp "Token: " token
   echo
   if [[ -z "$token" ]]; then
@@ -59,7 +55,7 @@ fi
 export TF_VAR_pagerduty_api_url_override="$API_BASE_URL"
 
 # --- 3. Domain Check ---
-# (Verify connectivity - useful for both modes to ensure token is valid)
+# (Verify connectivity to ensure valid token)
 echo
 if [[ -z "${PD_DOMAIN:-}" ]]; then
   echo "Enter PagerDuty Domain Name (subdomain only):"
@@ -75,17 +71,97 @@ fi
 echo "-> Verifying connectivity to $PD_DOMAIN ($PD_REGION)..."
 HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" -H "Authorization: Token token=$PAGERDUTY_TOKEN" -H "Accept: application/vnd.pagerduty+json;version=2" "$API_BASE_URL/priorities")
 
-if [[ "$HTTP_STATUS" == "200" ]]; then
-  echo "   [OK] Auth valid."
-elif [[ "$HTTP_STATUS" == "401" || "$HTTP_STATUS" == "403" ]]; then
-  echo "   [ERROR] Authentication failed (Status: $HTTP_STATUS). Check your Token."
-  exit 1
-else
+if [[ "$HTTP_STATUS" != "200" ]]; then
+  if [[ "$HTTP_STATUS" == "401" || "$HTTP_STATUS" == "403" ]]; then
+    echo "   [ERROR] Authentication failed (Status: $HTTP_STATUS). Check your Token."
+    exit 1
+  fi
   echo "   [WARN] API Check returned status $HTTP_STATUS. Proceeding..."
 fi
 
-# --- 4. User Email (Required for Valid Config) ---
-# We need a valid email for Terraform validation (data sources) even during destroy.
+# --- 4. Terraform Init ---
+echo "-> Initializing Terraform..."
+terraform init -upgrade -input=false >/dev/null
+
+# --- 5. Workspace Selection (Destroy Mode) ---
+
+if [[ "$MODE" == "destroy" ]]; then
+  echo
+  echo "Fetching available POV workspaces..."
+  
+  # Get list of workspaces, filter for 'pov-', strip '*', remove empty lines
+  raw_list=$(terraform workspace list | grep "pov-" | sed 's/[*[:space:]]//g')
+  
+  # Convert to array
+  workspaces=()
+  while IFS= read -r line; do
+    if [[ -n "$line" ]]; then
+      workspaces+=("$line")
+    fi
+  done <<< "$raw_list"
+
+  if [[ ${#workspaces[@]} -eq 0 ]]; then
+    echo "No 'pov-*' workspaces found to destroy."
+    exit 0
+  fi
+
+  echo "Select a workspace to destroy:"
+  i=1
+  for ws in "${workspaces[@]}"; do
+    # Display stripped name (e.g., 'pov-acme' -> 'acme')
+    display_name=${ws#pov-}
+    echo "  $i) $display_name"
+    ((i++))
+  done
+
+  echo
+  read -r -p "Enter number (1-${#workspaces[@]}): " selection
+
+  # Validate input
+  if ! [[ "$selection" =~ ^[0-9]+$ ]] || (( selection < 1 || selection > ${#workspaces[@]} )); then
+    echo "Error: Invalid selection." >&2
+    exit 1
+  fi
+
+  # Map selection to actual workspace name
+  WORKSPACE="${workspaces[$((selection-1))]}"
+  
+  # Confirm
+  echo
+  echo "WARNING: You are about to DESTROY the OrbitPay POV for: $WORKSPACE"
+  echo "This action cannot be undone."
+  read -r -p "Type 'yes' to confirm destruction: " confirm
+  
+  if [[ "$confirm" != "yes" ]]; then
+    echo "Aborted."
+    exit 0
+  fi
+
+  echo "-> Selecting Workspace: $WORKSPACE..."
+  if ! terraform workspace select "$WORKSPACE"; then
+    echo "Error: Failed to select workspace."
+    exit 1
+  fi
+
+  # Execute Destroy
+  echo "-> Destroying Resources..."
+  # Pass dummy email if needed via env var, but logic in main.tf should handle null now.
+  terraform destroy -auto-approve
+
+  echo "-> Removing Workspace..."
+  terraform workspace select default
+  terraform workspace delete "$WORKSPACE"
+
+  echo
+  echo "========================================"
+  echo "   Cleanup Complete."
+  echo "========================================"
+  exit 0
+fi
+
+# --- 6. Provision Mode Flow ---
+
+# User Email (Required for Provisioning)
 if [[ -z "${POV_USER_EMAIL:-}" ]]; then
   echo
   echo "Who is the primary user for this POV? (Used for Schedules)"
@@ -99,31 +175,13 @@ if [[ -z "${POV_USER_EMAIL:-}" ]]; then
 fi
 export TF_VAR_pov_user_email="$POV_USER_EMAIL"
 
-# --- 5. Terraform Init ---
-# (We init early so we can list workspaces if needed)
-echo "-> Initializing Terraform..."
-terraform init -upgrade -input=false >/dev/null
-
-# --- 6. Customer / Workspace Name ---
+# Customer Name
 echo
-
-if [[ "$MODE" == "destroy" ]]; then
-  echo "Available POV Workspaces:"
-  # List workspaces, filter for 'pov-', remove '*', remove whitespace, remove 'pov-' prefix
-  terraform workspace list | grep "pov-" | sed 's/[*[:space:]]//g' | sed 's/^pov-//' || echo "  (None found)"
-  echo
-fi
-
 echo "Enter Customer Name for this POV (e.g. 'Acme Corp'):"
-if [[ "$MODE" == "destroy" ]]; then
-  echo "  (Type the name from the list above)"
-fi
-
 read -r customer_name
-# Sanitize: lowercase, replace spaces with dashes, remove special chars
+# Sanitize
 safe_name=$(echo "$customer_name" | tr '[:upper:]' '[:lower:]' | tr -s ' ' '-' | sed 's/[^a-z0-9-]//g')
-
-# If user typed 'pov-acme', strip the 'pov-' prefix so we don't get 'pov-pov-acme'
+# Prevent double prefixing
 safe_name=${safe_name#pov-}
 
 if [[ -z "$safe_name" ]]; then
@@ -134,54 +192,19 @@ fi
 WORKSPACE="pov-$safe_name"
 echo "-> Target Workspace: $WORKSPACE"
 
-# --- 7. Mode Execution ---
+echo "-> Selecting/Creating Workspace..."
+terraform workspace new "$WORKSPACE" >/dev/null 2>&1 || true
+terraform workspace select "$WORKSPACE"
 
-if [[ "$MODE" == "provision" ]]; then
+echo
+echo "Ready to provision OrbitPay POV for '$customer_name'."
+echo "This will create teams, services, and schedules for $POV_USER_EMAIL."
+read -p "Press Enter to continue..."
 
-  echo "-> Selecting/Creating Workspace..."
-  terraform workspace new "$WORKSPACE" >/dev/null 2>&1 || true
-  terraform workspace select "$WORKSPACE"
+terraform apply -auto-approve
 
-  echo
-  echo "Ready to provision OrbitPay POV for '$customer_name'."
-  echo "This will create teams, services, and schedules for $POV_USER_EMAIL."
-  read -p "Press Enter to continue..."
-
-  terraform apply -auto-approve
-  
-  echo
-  echo "========================================"
-  echo "   POV Provisioned Successfully!"
-  echo "   Workspace: $WORKSPACE"
-  echo "========================================"
-
-else # MODE == destroy
-
-  echo "-> Selecting Workspace..."
-  if ! terraform workspace select "$WORKSPACE"; then
-    echo "Error: Workspace '$WORKSPACE' does not exist. Nothing to destroy?"
-    exit 1
-  fi
-
-  echo
-  echo "WARNING: You are about to DESTROY the OrbitPay POV for '$customer_name'."
-  echo "Workspace: $WORKSPACE"
-  echo "This action cannot be undone."
-  read -p "Type 'yes' to confirm destruction: " confirm
-  
-  if [[ "$confirm" != "yes" ]]; then
-    echo "Aborted."
-    exit 0
-  fi
-
-  terraform destroy -auto-approve
-
-  echo "-> Removing Workspace..."
-  terraform workspace select default
-  terraform workspace delete "$WORKSPACE"
-
-  echo
-  echo "========================================"
-  echo "   Cleanup Complete."
-  echo "========================================"
-fi
+echo
+echo "========================================"
+echo "   POV Provisioned Successfully!"
+echo "   Workspace: $WORKSPACE"
+echo "========================================"

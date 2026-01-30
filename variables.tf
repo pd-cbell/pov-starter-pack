@@ -21,6 +21,7 @@ variable "pagerduty_api_url_override" {
 variable "pov_user_email" {
   description = "The email address of the PagerDuty user who will be on-call for the POV schedules."
   type        = string
+  default     = null
 }
 
 # Map of team code -> schedule ID (Optional - if empty, schedules will be created)
