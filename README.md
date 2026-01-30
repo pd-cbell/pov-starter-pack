@@ -53,18 +53,14 @@ It creates a fully functional PagerDuty configuration for the OrbitPay simulated
 
 ## 🧹 Tear Down
 
-To destroy a specific POV environment:
+To destroy a specific POV environment, run the script with the `--destroy` flag:
 
-1.  Select the workspace:
-    ```bash
-    terraform workspace select pov-acme
-    ```
-2.  Destroy resources:
-    ```bash
-    terraform destroy -auto-approve
-    ```
-3.  (Optional) Delete the workspace:
-    ```bash
-    terraform workspace select default
-    terraform workspace delete pov-acme
-    ```
+```bash
+./scripts/quickstart.sh --destroy
+```
+
+Follow the prompts to select the Customer Name (workspace) you wish to remove. The script will:
+1.  Verify credentials.
+2.  Select the workspace (e.g., `pov-acme`).
+3.  Run `terraform destroy`.
+4.  Delete the workspace.

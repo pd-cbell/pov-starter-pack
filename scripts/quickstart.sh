@@ -2,15 +2,24 @@
 set -euo pipefail
 
 # OrbitPay POV Provisioner
-# - Interactive wizard to spin up a POV environment
+# - Interactive wizard to spin up or tear down a POV environment
 # - Handles Workspace creation per customer
 # - Auto-detects configuration or prompts user
 
+MODE="provision"
+if [[ "${1:-}" == "--destroy" || "${1:-}" == "-d" || "${1:-}" == "destroy" ]]; then
+  MODE="destroy"
+fi
+
 echo "========================================"
-echo "   OrbitPay POV Provisioner (Sandbox)"
+if [[ "$MODE" == "destroy" ]]; then
+  echo "   OrbitPay POV CLEANUP (Destroy)"
+else
+  echo "   OrbitPay POV Provisioner (Sandbox)"
+fi
 echo "========================================"
 
-# 1. Credentials
+# --- 1. Credentials ---
 if [[ -z "${PAGERDUTY_TOKEN:-}" ]]; then
   echo "Please enter your PagerDuty API Token."
   echo "  (If using a User Token, you must be an Admin/Owner to provision resources)"
@@ -25,7 +34,7 @@ if [[ -z "${PAGERDUTY_TOKEN:-}" ]]; then
 fi
 export TF_VAR_pagerduty_token="$PAGERDUTY_TOKEN"
 
-# 2. Region Selection
+# --- 2. Region Selection ---
 if [[ -z "${PD_REGION:-}" ]]; then
   echo
   echo "Select PagerDuty Region:"
@@ -49,7 +58,8 @@ else
 fi
 export TF_VAR_pagerduty_api_url_override="$API_BASE_URL"
 
-# 3. Domain Check & Priorities Validation
+# --- 3. Domain Check ---
+# (Verify connectivity - useful for both modes to ensure token is valid)
 echo
 if [[ -z "${PD_DOMAIN:-}" ]]; then
   echo "Enter PagerDuty Domain Name (subdomain only):"
@@ -63,37 +73,18 @@ if [[ -z "${PD_DOMAIN:-}" ]]; then
 fi
 
 echo "-> Verifying connectivity to $PD_DOMAIN ($PD_REGION)..."
-# Check if Priorities are enabled (GET /priorities)
-# We use this to test auth AND to warn the user if priorities are missing.
 HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" -H "Authorization: Token token=$PAGERDUTY_TOKEN" -H "Accept: application/vnd.pagerduty+json;version=2" "$API_BASE_URL/priorities")
 
 if [[ "$HTTP_STATUS" == "200" ]]; then
-  echo "   [OK] Auth valid & Priorities enabled."
+  echo "   [OK] Auth valid."
 elif [[ "$HTTP_STATUS" == "401" || "$HTTP_STATUS" == "403" ]]; then
   echo "   [ERROR] Authentication failed (Status: $HTTP_STATUS). Check your Token."
   exit 1
 else
-  echo "   [WARN] Could not verify Priorities (Status: $HTTP_STATUS)."
-  echo "          If this is a Free account, Event Orchestration rules involving P1-P5 might fail."
-  echo "          Please enable 'Incident Priority' in Account Settings if available."
-  read -p "   Press Enter to attempt provisioning anyway..."
+  echo "   [WARN] API Check returned status $HTTP_STATUS. Proceeding..."
 fi
 
-# 3. User Email (for Schedules)
-if [[ -z "${POV_USER_EMAIL:-}" ]]; then
-  echo
-  echo "Who should be on-call for these teams?"
-  echo "  Enter the email address of a valid user in this account."
-  read -r user_email
-  if [[ -z "$user_email" ]]; then
-    echo "Error: Email required to assign schedules." >&2
-    exit 1
-  fi
-  export POV_USER_EMAIL="$user_email"
-fi
-export TF_VAR_pov_user_email="$POV_USER_EMAIL"
-
-# 4. Customer / Workspace Name
+# --- 4. Customer / Workspace Name ---
 echo
 echo "Enter Customer Name for this POV (e.g. 'Acme Corp'):"
 read -r customer_name
@@ -108,28 +99,76 @@ fi
 WORKSPACE="pov-$safe_name"
 echo "-> Target Workspace: $WORKSPACE"
 
-# 5. Terraform Init & Workspace
+# --- 5. Terraform Init ---
 echo "-> Initializing Terraform..."
 terraform init -upgrade -input=false >/dev/null
 
-echo "-> Selecting Workspace..."
-terraform workspace new "$WORKSPACE" >/dev/null 2>&1 || true
-terraform workspace select "$WORKSPACE"
+# --- 6. Mode Execution ---
 
-# 6. Plan & Apply
-echo
-echo "Ready to provision OrbitPay POV for '$customer_name'."
-echo "This will create:"
-echo "  - 4 Teams (PP, WL, CX, CI)"
-echo "  - Services & Dependencies"
-echo "  - On-call schedules for $POV_USER_EMAIL"
-echo
-read -p "Press Enter to continue or Ctrl+C to cancel..."
+if [[ "$MODE" == "provision" ]]; then
 
-terraform apply -auto-approve
+  # User Email (Only needed for provisioning schedules)
+  if [[ -z "${POV_USER_EMAIL:-}" ]]; then
+    echo
+    echo "Who should be on-call for these teams?"
+    echo "  Enter the email address of a valid user in this account."
+    read -r user_email
+    if [[ -z "$user_email" ]]; then
+      echo "Error: Email required to assign schedules." >&2
+      exit 1
+    fi
+    export POV_USER_EMAIL="$user_email"
+  fi
+  export TF_VAR_pov_user_email="$POV_USER_EMAIL"
 
-echo
-echo "========================================"
-echo "   POV Provisioned Successfully!"
-echo "   Workspace: $WORKSPACE"
-echo "========================================"
+  echo "-> Selecting/Creating Workspace..."
+  terraform workspace new "$WORKSPACE" >/dev/null 2>&1 || true
+  terraform workspace select "$WORKSPACE"
+
+  echo
+  echo "Ready to provision OrbitPay POV for '$customer_name'."
+  echo "This will create teams, services, and schedules for $POV_USER_EMAIL."
+  read -p "Press Enter to continue..."
+
+  terraform apply -auto-approve
+  
+  echo
+  echo "========================================"
+  echo "   POV Provisioned Successfully!"
+  echo "   Workspace: $WORKSPACE"
+  echo "========================================"
+
+else # MODE == destroy
+
+  echo "-> Selecting Workspace..."
+  if ! terraform workspace select "$WORKSPACE"; then
+    echo "Error: Workspace '$WORKSPACE' does not exist. Nothing to destroy?"
+    exit 1
+  fi
+  
+  # We need to set dummy variables for destroy to work if validation requires them
+  # (Though TF destroy usually needs valid inputs if providers use them)
+  export TF_VAR_pov_user_email="dummy@example.com"
+
+  echo
+  echo "WARNING: You are about to DESTROY the OrbitPay POV for '$customer_name'."
+  echo "Workspace: $WORKSPACE"
+  echo "This action cannot be undone."
+  read -p "Type 'yes' to confirm destruction: " confirm
+  
+  if [[ "$confirm" != "yes" ]]; then
+    echo "Aborted."
+    exit 0
+  fi
+
+  terraform destroy -auto-approve
+
+  echo "-> Removing Workspace..."
+  terraform workspace select default
+  terraform workspace delete "$WORKSPACE"
+
+  echo
+  echo "========================================"
+  echo "   Cleanup Complete."
+  echo "========================================"
+fi
