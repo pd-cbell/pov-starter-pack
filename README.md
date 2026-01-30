@@ -7,6 +7,7 @@ It creates a fully functional PagerDuty configuration for the OrbitPay simulated
 ## ✨ Features
 
 *   **Zero Config:** Just bring your API Token. Schedules and Users are auto-configured.
+*   **Region Support:** Works seamlessly with both **US** and **EU** PagerDuty service regions.
 *   **Isolated Sandboxes:** Uses Terraform Workspaces (e.g., `pov-acme`) so you can run multiple POVs in the same account without collisions.
 *   **Full Architecture:** Deploys the standard OrbitPay 4-Team model (Payments, Wallet, CX, Infra) with L1-L3 service dependencies.
 

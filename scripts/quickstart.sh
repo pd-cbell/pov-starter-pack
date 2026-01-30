@@ -25,7 +25,31 @@ if [[ -z "${PAGERDUTY_TOKEN:-}" ]]; then
 fi
 export TF_VAR_pagerduty_token="$PAGERDUTY_TOKEN"
 
-# 2. Domain Check & Priorities Validation
+# 2. Region Selection
+if [[ -z "${PD_REGION:-}" ]]; then
+  echo
+  echo "Select PagerDuty Region:"
+  echo "  1) US (default)"
+  echo "  2) EU"
+  read -r -p "Enter 1 or 2: " region_choice
+  case "$region_choice" in
+    2|EU|eu)
+      PD_REGION="EU"
+      ;;
+    *)
+      PD_REGION="US"
+      ;;
+  esac
+fi
+
+if [[ "$PD_REGION" == "EU" ]]; then
+  API_BASE_URL="https://api.eu.pagerduty.com"
+else
+  API_BASE_URL="https://api.pagerduty.com"
+fi
+export TF_VAR_pagerduty_api_url_override="$API_BASE_URL"
+
+# 3. Domain Check & Priorities Validation
 echo
 if [[ -z "${PD_DOMAIN:-}" ]]; then
   echo "Enter PagerDuty Domain Name (subdomain only):"
@@ -38,10 +62,10 @@ if [[ -z "${PD_DOMAIN:-}" ]]; then
   export PD_DOMAIN="$domain"
 fi
 
-echo "-> Verifying connectivity to $PD_DOMAIN..."
+echo "-> Verifying connectivity to $PD_DOMAIN ($PD_REGION)..."
 # Check if Priorities are enabled (GET /priorities)
 # We use this to test auth AND to warn the user if priorities are missing.
-HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" -H "Authorization: Token token=$PAGERDUTY_TOKEN" -H "Accept: application/vnd.pagerduty+json;version=2" "https://api.pagerduty.com/priorities")
+HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" -H "Authorization: Token token=$PAGERDUTY_TOKEN" -H "Accept: application/vnd.pagerduty+json;version=2" "$API_BASE_URL/priorities")
 
 if [[ "$HTTP_STATUS" == "200" ]]; then
   echo "   [OK] Auth valid & Priorities enabled."
