@@ -4,6 +4,10 @@ terraform {
       source  = "PagerDuty/pagerduty"
       version = ">= 3.29.0, < 4.0.0"
     }
+    http = {
+      source  = "hashicorp/http"
+      version = ">= 3.0.0"
+    }
   }
 }
 
@@ -268,8 +272,27 @@ resource "pagerduty_service_dependency" "orbitpay_ts_edges" {
 ############################
 
 # Priorities (names must exist)
-# Fetch all priorities (sorted P1..P5)
-data "pagerduty_priorities" "all" {}
+# Priorities (Fetch via HTTP to be name-agnostic and support dynamic environments)
+locals {
+  # Default to US API if override is empty
+  pd_api_url = var.pagerduty_api_url_override != "" ? var.pagerduty_api_url_override : "https://api.pagerduty.com"
+}
+
+data "http" "priorities" {
+  url = "${local.pd_api_url}/priorities"
+
+  request_headers = {
+    Authorization = "Token token=${var.pagerduty_token}"
+    Accept        = "application/vnd.pagerduty+json;version=2"
+    Content-Type  = "application/json"
+  }
+}
+
+locals {
+  # Parse the JSON response
+  # PagerDuty returns priorities sorted by severity (P1=Index 0, P2=Index 1...)
+  priorities_list = jsondecode(data.http.priorities.response_body).priorities
+}
 
 resource "pagerduty_event_orchestration" "global" {
   name = "OrbitPay Operations Global"
@@ -310,7 +333,7 @@ resource "pagerduty_event_orchestration_global" "global" {
       label    = "Warning Alert - P5"
       condition { expression = "event.severity matches part 'warning'" }
       actions {
-        priority = data.pagerduty_priorities.all.priorities[4].id
+        priority = local.priorities_list[4].id
       }
     }
 
@@ -319,7 +342,7 @@ resource "pagerduty_event_orchestration_global" "global" {
       label    = "Critical Alert - P4"
       condition { expression = "event.severity matches part 'critical'" }
       actions {
-        priority = data.pagerduty_priorities.all.priorities[3].id
+        priority = local.priorities_list[3].id
       }
     }
 
@@ -347,7 +370,7 @@ resource "pagerduty_event_orchestration_global" "global" {
       condition { expression = "event.custom_details.application_impact matches part 'Outage'" }
       actions {
         event_action = "trigger"
-        priority     = data.pagerduty_priorities.all.priorities[1].id
+        priority     = local.priorities_list[1].id
         severity     = "critical"
 
         dynamic "incident_custom_field_update" {
@@ -467,19 +490,19 @@ resource "pagerduty_event_orchestration_global" "team" {
 
     rule {
       condition { expression = "event.severity == 'critical'" }
-      actions { priority = data.pagerduty_priorities.all.priorities[1].id }
+      actions { priority = local.priorities_list[1].id }
     }
     rule {
       condition { expression = "event.severity == 'error'" }
-      actions { priority = data.pagerduty_priorities.all.priorities[2].id }
+      actions { priority = local.priorities_list[2].id }
     }
     rule {
       condition { expression = "event.severity == 'warning'" }
-      actions { priority = data.pagerduty_priorities.all.priorities[3].id }
+      actions { priority = local.priorities_list[3].id }
     }
     rule {
       condition { expression = "event.severity == 'info'" }
-      actions { priority = data.pagerduty_priorities.all.priorities[4].id }
+      actions { priority = local.priorities_list[4].id }
     }
   }
 
