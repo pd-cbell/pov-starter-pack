@@ -84,29 +84,47 @@ else
   echo "   [WARN] API Check returned status $HTTP_STATUS. Proceeding..."
 fi
 
-# --- 4. Terraform Init ---
+# --- 4. User Email (Required for Valid Config) ---
+# We need a valid email for Terraform validation (data sources) even during destroy.
+if [[ -z "${POV_USER_EMAIL:-}" ]]; then
+  echo
+  echo "Who is the primary user for this POV? (Used for Schedules)"
+  echo "  Enter the email address of a valid user in this account."
+  read -r user_email
+  if [[ -z "$user_email" ]]; then
+    echo "Error: Email required." >&2
+    exit 1
+  fi
+  export POV_USER_EMAIL="$user_email"
+fi
+export TF_VAR_pov_user_email="$POV_USER_EMAIL"
+
+# --- 5. Terraform Init ---
 # (We init early so we can list workspaces if needed)
 echo "-> Initializing Terraform..."
 terraform init -upgrade -input=false >/dev/null
 
-# --- 5. Customer / Workspace Name ---
+# --- 6. Customer / Workspace Name ---
 echo
 
 if [[ "$MODE" == "destroy" ]]; then
   echo "Available POV Workspaces:"
-  # List workspaces, filter for 'pov-', remove the current selection marker '*'
-  terraform workspace list | grep "pov-" | sed 's/*//' || echo "  (None found)"
+  # List workspaces, filter for 'pov-', remove '*', remove whitespace, remove 'pov-' prefix
+  terraform workspace list | grep "pov-" | sed 's/[*[:space:]]//g' | sed 's/^pov-//' || echo "  (None found)"
   echo
 fi
 
 echo "Enter Customer Name for this POV (e.g. 'Acme Corp'):"
 if [[ "$MODE" == "destroy" ]]; then
-  echo "  (Type the name as it appears in the workspace list, e.g. for 'pov-acme', enter 'acme' or 'Acme')"
+  echo "  (Type the name from the list above)"
 fi
 
 read -r customer_name
 # Sanitize: lowercase, replace spaces with dashes, remove special chars
 safe_name=$(echo "$customer_name" | tr '[:upper:]' '[:lower:]' | tr -s ' ' '-' | sed 's/[^a-z0-9-]//g')
+
+# If user typed 'pov-acme', strip the 'pov-' prefix so we don't get 'pov-pov-acme'
+safe_name=${safe_name#pov-}
 
 if [[ -z "$safe_name" ]]; then
   echo "Error: Invalid customer name." >&2
@@ -116,23 +134,9 @@ fi
 WORKSPACE="pov-$safe_name"
 echo "-> Target Workspace: $WORKSPACE"
 
-# --- 6. Mode Execution ---
+# --- 7. Mode Execution ---
 
 if [[ "$MODE" == "provision" ]]; then
-
-  # User Email (Only needed for provisioning schedules)
-  if [[ -z "${POV_USER_EMAIL:-}" ]]; then
-    echo
-    echo "Who should be on-call for these teams?"
-    echo "  Enter the email address of a valid user in this account."
-    read -r user_email
-    if [[ -z "$user_email" ]]; then
-      echo "Error: Email required to assign schedules." >&2
-      exit 1
-    fi
-    export POV_USER_EMAIL="$user_email"
-  fi
-  export TF_VAR_pov_user_email="$POV_USER_EMAIL"
 
   echo "-> Selecting/Creating Workspace..."
   terraform workspace new "$WORKSPACE" >/dev/null 2>&1 || true
@@ -158,10 +162,6 @@ else # MODE == destroy
     echo "Error: Workspace '$WORKSPACE' does not exist. Nothing to destroy?"
     exit 1
   fi
-  
-  # We need to set dummy variables for destroy to work if validation requires them
-  # (Though TF destroy usually needs valid inputs if providers use them)
-  export TF_VAR_pov_user_email="dummy@example.com"
 
   echo
   echo "WARNING: You are about to DESTROY the OrbitPay POV for '$customer_name'."
