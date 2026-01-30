@@ -1,0 +1,12 @@
+.terraform/
+terraform.tfstate.d/
+*.tfstate*
+terraform.tfvars
+# keep secrets out of git
+
+# Local plans and crash logs
+tfplan*
+crash.log
+
+# OS/editor noise
+.DS_Store

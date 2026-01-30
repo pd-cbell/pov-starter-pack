@@ -1,0 +1,69 @@
+# OrbitPay POV Provisioner
+
+This repository contains a **self-service Terraform template** designed to provision isolated **OrbitPay POV environments** on demand.
+
+It creates a fully functional PagerDuty configuration for the OrbitPay simulated enterprise, including Teams, Services, Dependencies, and Event Orchestration.
+
+## ✨ Features
+
+*   **Zero Config:** Just bring your API Token. Schedules and Users are auto-configured.
+*   **Isolated Sandboxes:** Uses Terraform Workspaces (e.g., `pov-acme`) so you can run multiple POVs in the same account without collisions.
+*   **Full Architecture:** Deploys the standard OrbitPay 4-Team model (Payments, Wallet, CX, Infra) with L1-L3 service dependencies.
+
+## 🚀 Quick Start
+
+### Prerequisites
+*   [Terraform](https://developer.hashicorp.com/terraform/downloads) (v1.3+)
+*   PagerDuty **User API Token** (Account Settings -> API Access)
+
+### Provision a POV
+
+1.  Run the provisioner script:
+    ```bash
+    ./scripts/quickstart.sh
+    ```
+
+2.  Follow the prompts:
+    *   **Token:** Paste your PagerDuty API Token.
+    *   **Email:** Enter your email (you will be placed on-call).
+    *   **Customer Name:** Enter the prospect's name (e.g., "Acme").
+
+3.  **Done!** The script will create a workspace (e.g., `pov-acme`) and deploy the resources.
+
+## 🏗 What Gets Built?
+
+**Teams:**
+*   Payments Platform (PP)
+*   Wallet & Ledgers (WL)
+*   Customer Experience (CX)
+*   Core Infrastructure (CI)
+
+**Schedules:**
+*   4x 24/7 Schedules (one per team), with YOU on call.
+
+**Services:**
+*   **Business Services:** Payments API, Digital Wallet, etc.
+*   **Technical Services:** API Gateway, Ledger DB, Service Mesh, etc.
+*   **Dependencies:** Full topology mapping (L1/L2/L3).
+
+**Automation:**
+*   Global Event Orchestration (Routing & Severity rules).
+*   Team Event Orchestrations.
+
+## 🧹 Tear Down
+
+To destroy a specific POV environment:
+
+1.  Select the workspace:
+    ```bash
+    terraform workspace select pov-acme
+    ```
+2.  Destroy resources:
+    ```bash
+    terraform destroy -auto-approve
+    ```
+3.  (Optional) Delete the workspace:
+    ```bash
+    terraform workspace select default
+    terraform workspace delete pov-acme
+    ```

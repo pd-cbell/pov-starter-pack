@@ -1,0 +1,39 @@
+output "team_ids" {
+  description = "Created PagerDuty team IDs by code"
+  value       = { for k, v in pagerduty_team.team : k => v.id }
+}
+
+output "team_ep_ids" {
+  description = "Escalation policy IDs by team code"
+  value       = { for k, v in pagerduty_escalation_policy.team_ep : k => v.id }
+}
+
+output "business_service_ids" {
+  description = "Business service IDs by name"
+  value       = { for name, r in pagerduty_business_service.orbitpay_bs : name => r.id }
+}
+
+output "technical_service_ids" {
+  description = "Technical service IDs by name"
+  value       = { for name, r in pagerduty_service.orbitpay_ts : name => r.id }
+}
+
+output "service_custom_field_ids" {
+  description = "Service Custom Field IDs by key"
+  value = {
+    criticality  = local.scf_id_criticality
+    service_tier = local.scf_id_tier
+    environment  = local.scf_id_environment
+  }
+}
+
+output "global_orchestration_id" {
+  description = "Global orchestration ID"
+  value       = pagerduty_event_orchestration.global.id
+}
+
+output "global_orchestration_routing_key" {
+  description = "Global orchestration integration routing key"
+  value       = pagerduty_event_orchestration_integration.global.parameters[0].routing_key
+  sensitive   = true
+}
