@@ -84,9 +84,26 @@ else
   echo "   [WARN] API Check returned status $HTTP_STATUS. Proceeding..."
 fi
 
-# --- 4. Customer / Workspace Name ---
+# --- 4. Terraform Init ---
+# (We init early so we can list workspaces if needed)
+echo "-> Initializing Terraform..."
+terraform init -upgrade -input=false >/dev/null
+
+# --- 5. Customer / Workspace Name ---
 echo
+
+if [[ "$MODE" == "destroy" ]]; then
+  echo "Available POV Workspaces:"
+  # List workspaces, filter for 'pov-', remove the current selection marker '*'
+  terraform workspace list | grep "pov-" | sed 's/*//' || echo "  (None found)"
+  echo
+fi
+
 echo "Enter Customer Name for this POV (e.g. 'Acme Corp'):"
+if [[ "$MODE" == "destroy" ]]; then
+  echo "  (Type the name as it appears in the workspace list, e.g. for 'pov-acme', enter 'acme' or 'Acme')"
+fi
+
 read -r customer_name
 # Sanitize: lowercase, replace spaces with dashes, remove special chars
 safe_name=$(echo "$customer_name" | tr '[:upper:]' '[:lower:]' | tr -s ' ' '-' | sed 's/[^a-z0-9-]//g')
@@ -98,10 +115,6 @@ fi
 
 WORKSPACE="pov-$safe_name"
 echo "-> Target Workspace: $WORKSPACE"
-
-# --- 5. Terraform Init ---
-echo "-> Initializing Terraform..."
-terraform init -upgrade -input=false >/dev/null
 
 # --- 6. Mode Execution ---
 
