@@ -161,7 +161,9 @@ resource "pagerduty_schedule" "pov_schedule" {
     start                        = "2023-01-01T00:00:00-00:00"
     rotation_virtual_start       = "2023-01-01T00:00:00-00:00"
     rotation_turn_length_seconds = 86400
-    users                        = var.pov_user_email != null ? [data.pagerduty_user.pov_user[0].id] : []
+    # During destroy (email is null), provide a dummy ID to satisfy provider schema validation.
+    # The resource is being deleted, so this ID is never used against the API.
+    users = var.pov_user_email != null ? [data.pagerduty_user.pov_user[0].id] : ["P000000"]
   }
 }
 
