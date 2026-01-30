@@ -268,10 +268,8 @@ resource "pagerduty_service_dependency" "orbitpay_ts_edges" {
 ############################
 
 # Priorities (names must exist)
-data "pagerduty_priority" "p2" { name = "P2" }
-data "pagerduty_priority" "p3" { name = "P3" }
-data "pagerduty_priority" "p4" { name = "P4" }
-data "pagerduty_priority" "p5" { name = "P5" }
+# Fetch all priorities (sorted P1..P5)
+data "pagerduty_priorities" "all" {}
 
 resource "pagerduty_event_orchestration" "global" {
   name = "OrbitPay Operations Global"
@@ -312,7 +310,7 @@ resource "pagerduty_event_orchestration_global" "global" {
       label    = "Warning Alert - P5"
       condition { expression = "event.severity matches part 'warning'" }
       actions {
-        priority = data.pagerduty_priority.p5.id
+        priority = data.pagerduty_priorities.all.priorities[4].id
       }
     }
 
@@ -321,7 +319,7 @@ resource "pagerduty_event_orchestration_global" "global" {
       label    = "Critical Alert - P4"
       condition { expression = "event.severity matches part 'critical'" }
       actions {
-        priority = data.pagerduty_priority.p4.id
+        priority = data.pagerduty_priorities.all.priorities[3].id
       }
     }
 
@@ -349,7 +347,7 @@ resource "pagerduty_event_orchestration_global" "global" {
       condition { expression = "event.custom_details.application_impact matches part 'Outage'" }
       actions {
         event_action = "trigger"
-        priority     = data.pagerduty_priority.p2.id
+        priority     = data.pagerduty_priorities.all.priorities[1].id
         severity     = "critical"
 
         dynamic "incident_custom_field_update" {
@@ -469,19 +467,19 @@ resource "pagerduty_event_orchestration_global" "team" {
 
     rule {
       condition { expression = "event.severity == 'critical'" }
-      actions { priority = data.pagerduty_priority.p2.id }
+      actions { priority = data.pagerduty_priorities.all.priorities[1].id }
     }
     rule {
       condition { expression = "event.severity == 'error'" }
-      actions { priority = data.pagerduty_priority.p3.id }
+      actions { priority = data.pagerduty_priorities.all.priorities[2].id }
     }
     rule {
       condition { expression = "event.severity == 'warning'" }
-      actions { priority = data.pagerduty_priority.p4.id }
+      actions { priority = data.pagerduty_priorities.all.priorities[3].id }
     }
     rule {
       condition { expression = "event.severity == 'info'" }
-      actions { priority = data.pagerduty_priority.p5.id }
+      actions { priority = data.pagerduty_priorities.all.priorities[4].id }
     }
   }
 
